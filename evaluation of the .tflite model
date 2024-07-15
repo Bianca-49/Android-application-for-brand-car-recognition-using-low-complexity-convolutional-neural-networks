@@ -1,0 +1,88 @@
+# Cod pentru evaluarea acurateții modelului .tflite
+
+# "Helper" pentru evaluarea acuratetii pe modelul .tflite
+#--------------------------------------------------------------------
+# Se ruleaza o data - util pentru a prezice acuratetea
+# adaptat dupa: https://www.tensorflow.org/lite/performance/post_training_quant
+# Copyright Radu Dogaru, May 2024 radu.dogaru@upb.ro
+#
+import time as ti
+from sklearn.metrics import classification_report, confusion_matrix
+import tensorflow as tf
+
+# functie pentru conversia din format datagen in x_train x_test
+# se preiau un numar bine precizat de "batch-uri"
+# Copyright Radu Dogaru, 1 June 2024
+#------------------------------------------------------------
+def conv_tensor(datagen, num_batches):
+    for x_test, y_test in datagen:
+            break;
+    for b in range(num_batches-1):
+        for x, y in datagen:
+            break;
+        x_test= tf.concat([x_test, x], axis=0)
+        y_test= tf.concat([y_test, y], axis=0)
+    return x_test, y_test
+
+
+# A helper function to evaluate the TF Lite model using "test" dataset.
+def evaluate_model(interpreter, num_batches, test_generator, num_classes):  # num_batches only if you use validation_generator
+  if datagen==True:
+    # prepare some x_test y_test data for num_batches
+    x_test,y_test=conv_tensor(datagen=test_generator, num_batches=num_batches)
+  #print('xxxxxxxx',np.shape(y_test))
+  if out_coding=='non':
+        ync_test=y_test
+  else:
+        ync_test=np.int16(np.dot(y_test,np.array(range(num_classes))))
+  input_index = interpreter.get_input_details()[0]["index"]
+  output_index = interpreter.get_output_details()[0]["index"]
+  #print('oinx: ', output_index)
+  # Run predictions on every image in the "test" dataset.
+  prediction_digits = []
+  durata=0
+  for test_image in x_test:
+    # Pre-processing: add batch dimension and convert to float32 to match with
+    # the model's input data format.
+    #print(np.shape(test_image))
+    test_image = np.expand_dims(test_image, axis=0).astype(np.float32) # * 255 # comentat
+    #print(np.shape(test_image))
+    interpreter.set_tensor(input_index, test_image)
+    t1=ti.time()
+    # Run inference.
+    interpreter.invoke()
+    t2=ti.time()
+    durata += (t2-t1)
+    # Post-processing: remove batch dimension and find the digit with highest
+    # probability.
+    output = interpreter.get_tensor(output_index)  # s-a modificat la get_tensor (varianta tensor nu mai este actuala !!!)
+    #print('Output: ',output)
+    digit = np.argmax(output, axis=1)  # si aici s-a modificat de la output()[0]
+    #print('digite=',digit)
+    prediction_digits.append(digit)
+
+  # Compare prediction results with ground truth labels to calculate accuracy.
+  accurate_count = 0
+  for index in range(len(prediction_digits)):
+    if prediction_digits[index] == ync_test[index]:
+      accurate_count += 1
+  accuracy = accurate_count * 1.0 / len(prediction_digits)
+  C=confusion_matrix(prediction_digits,ync_test)  # matricea de confuzie pe model .tflite
+  print(C)
+  print(classification_report(ync_test, prediction_digits ))
+  return accuracy, prediction_digits, 1000*durata/len(prediction_digits)
+
+# absolut necesare pentru a se putea lucra mai departe
+interpreter = tf.lite.Interpreter(model_path='../input/tflite/tflite/tflite/1/effB0_quant.tflite' )  #
+interpreter.allocate_tensors()
+
+datagen=True ; out_coding='cat'  # s-a lucrat cu datagen si format ;sparse;
+# num_bathes se alege astfel incat sa avem un numar mare de esantioane pentru evaluare
+# numar de esantioane este num_batches*train_batch
+# un numar prea mare poate duce la dep. de memorie !!
+# Daca datagen=False num_batches nu conteaza
+# Daca datagen=True se pot alege x_test=[], y_test=[]
+# Evaluarea modelului TFLite
+num_batches = 8  # număr de batch-uri pentru evaluare
+acc, pred, lat = evaluate_model(interpreter, num_batches, test_generator, num_classes)
+print('Acuratețea pe modelul .tflite este de', 100 * acc, '%', 'Latență:', lat, 'ms')
