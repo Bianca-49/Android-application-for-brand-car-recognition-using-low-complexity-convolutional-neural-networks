@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+    <resources>
+        <color name="button_background">#673AB7</color> <!-- culoarea mov pentru fundal -->
+        <color name="button_text">#FFFFFF</color> <!-- culoarea albă pentru text -->
+        <color name="text_color">#FFFFFF</color> <!-- culoarea albă pentru text -->
+        <color name="light_pink_background">#FFCDD2</color> <!-- culoarea roz deschis pentru fundal -->
+    </resources>
+
+
+
+
+

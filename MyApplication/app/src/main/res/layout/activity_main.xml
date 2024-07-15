@@ -1,0 +1,144 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <LinearLayout
+        android:id="@+id/selectionLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_centerInParent="true">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Selectează modelul pentru predicție"
+            android:textSize="23sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="10dp"
+            android:textColor="@color/text_color"/>
+
+        <RadioGroup
+            android:id="@+id/modelSelectionGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerHorizontal="true"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/selectEffb0Quant"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:text="EfficientNet"
+                android:textColor="@color/text_color"/>
+
+            <RadioButton
+                android:id="@+id/selectDense"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="DenseNet"
+                android:textSize="18sp"
+                android:checked="true"
+                android:textColor="@color/text_color"/>
+        </RadioGroup>
+
+        <Button
+            android:layout_width="320dp"
+            android:layout_height="wrap_content"
+            android:id="@+id/button_camera"
+            android:text="@string/take_picture"
+            android:textAllCaps="false"
+            android:textSize="21sp"
+            android:textStyle="bold"
+            android:layout_marginTop="80dp"
+            android:backgroundTint="@color/button_background"
+            android:textColor="@color/button_text"/>
+        <Button
+            android:layout_width="320dp"
+            android:layout_height="wrap_content"
+            android:id="@+id/button_gallery"
+            android:text="@string/launch_gallery"
+            android:textAllCaps="false"
+            android:textSize="21sp"
+            android:textStyle="bold"
+            android:backgroundTint="@color/button_background"
+            android:textColor="@color/button_text"/>
+    </LinearLayout>
+
+    <ImageView
+        android:layout_width="370sp"
+        android:layout_height="370sp"
+        android:layout_centerHorizontal="true"
+        android:id="@+id/imageView"
+        android:layout_marginTop="10sp"
+        android:contentDescription="@string/todo"
+        android:visibility="gone" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:id="@+id/modelTextView"
+        android:textStyle="bold"
+        android:textSize="20sp"
+        android:layout_below="@+id/imageView"
+        android:layout_marginTop="10sp"
+        android:visibility="gone"
+        android:textColor="@color/text_color"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:id="@+id/classTextView"
+        android:textStyle="bold"
+        android:textSize="20sp"
+        android:layout_below="@+id/modelTextView"
+        android:layout_marginTop="10sp"
+        android:visibility="gone"
+        android:textColor="@color/text_color"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:id="@+id/confidenceTextView"
+        android:textStyle="bold"
+        android:textSize="20sp"
+        android:layout_below="@+id/classTextView"
+        android:layout_marginTop="10sp"
+        android:visibility="gone"
+        android:textColor="@color/text_color"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:id="@+id/executionTimeTextView"
+        android:textStyle="bold"
+        android:textSize="20sp"
+        android:layout_below="@+id/confidenceTextView"
+        android:layout_marginTop="10sp"
+        android:visibility="gone"
+        android:textColor="@color/text_color"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:id="@+id/button_new_prediction"
+        android:text="@string/p_încă_un_model"
+        android:textAllCaps="false"
+        android:textSize="21sp"
+        android:textStyle="bold"
+        android:layout_below="@id/executionTimeTextView"
+        android:layout_marginTop="100sp"
+        android:visibility="gone"
+        android:backgroundTint="@color/button_background"
+        android:textColor="@color/button_text"/>
+</RelativeLayout>

@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Recunoaștere marcă mașină</string>
+    <string name="take_picture">Accesează camera</string>
+    <string name="launch_gallery">Accesează galeria</string>
+    <string name="todo">TODO</string>
+    <string name="classified_as">Alege modelul:</string>
+    <string name="p_încă_un_model">Prezice încă un model</string>
+</resources>
