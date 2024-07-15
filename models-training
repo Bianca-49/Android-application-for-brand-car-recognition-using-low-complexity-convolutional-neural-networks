@@ -1,0 +1,766 @@
+# Anexa 1
+
+!pip install keras==2.15.0
+!pip install -U --pre efficientnet
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import time as ti
+from datetime import datetime
+from typing import List, Tuple
+import scipy.misc
+import PIL.Image
+import shutil
+import pathlib
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import (
+    Input, Add, Dense, Rescaling, Activation, ZeroPadding2D, BatchNormalization, 
+    Flatten, Conv2D, AveragePooling2D, MaxPooling2D, GlobalMaxPooling2D,
+    Dropout, GlobalAveragePooling2D, DepthwiseConv2D, SeparableConv2D
+)
+from tensorflow.keras.optimizers import Adam, Nadam
+from tensorflow.keras.optimizers.schedules import ExponentialDecay
+from tensorflow.keras.initializers import glorot_uniform
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.applications.imagenet_utils import preprocess_input
+from tensorflow.keras.utils import plot_model, model_to_dot
+from tensorflow.python.keras.utils import layer_utils
+from tensorflow.keras.metrics import CategoricalAccuracy
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+import keras
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+from keras import backend as K
+from IPython.display import SVG
+
+
+# Definirea directoarelor
+train_dir = '../input/compcars-239-classes/CompCars/CompCars editat/train'  
+test_dir = '../input/compcars-239-classes/CompCars/CompCars editat/test'    
+imsize = 224
+train_batch = 32
+
+# Crearea ImageDataGenerator pentru antrenament și validare
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    horizontal_flip=True,
+    fill_mode='nearest',
+    rotation_range=20,
+    brightness_range=[0.8,1.2],
+    validation_split=0.2
+)
+
+# Crearea generatorului de antrenament
+train_generator = train_datagen.flow_from_directory(
+    train_dir,
+    target_size=(imsize, imsize),
+    batch_size=train_batch,
+    class_mode='categorical',
+    subset='training'
+)
+
+# Crearea generatorului de validare
+validation_generator = train_datagen.flow_from_directory(
+    train_dir,
+    target_size=(imsize, imsize),
+    batch_size=train_batch,
+    class_mode='categorical',
+    subset='validation'
+)
+
+# Crearea ImageDataGenerator pentru test
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+# Crearea generatorului de test
+test_generator = test_datagen.flow_from_directory(
+    test_dir,
+    target_size=(imsize, imsize),
+    batch_size=train_batch,
+    class_mode='categorical',
+    shuffle=False
+)
+
+# Numărul de clase
+num_classes = len(train_generator.class_indices)
+
+# Antrenarea modelului EfficientNet
+
+import efficientnet.tfkeras as efn
+input_shape=(224,224,3)
+def get_efficientNet_model():
+    enet = efn.EfficientNetB0(
+        input_shape=input_shape,
+        weights='noisy-student',
+        include_top=False
+    )
+
+    efficient_model = tf.keras.Sequential([
+        enet,
+        tf.keras.layers.GlobalAveragePooling2D(),
+        tf.keras.layers.Dense(num_classes, activation='softmax')
+    ])
+
+    return efficient_model
+
+efficient_model = get_efficientNet_model()
+
+# Compile the Model
+efficient_model.compile(
+        optimizer='adam',
+        loss = 'categorical_crossentropy',
+        metrics=['accuracy'],
+        #steps_per_execution=16
+    )
+efficient_model.summary()
+
+
+
+# Plot the model
+plot_model(efficient_model, to_file='model.png', show_shapes=True, show_layer_names=True, dpi=96)
+epoci = 20
+batch_size = 32
+
+# Callback-urile
+checkpoint = ModelCheckpoint('best_model.keras', monitor='val_accuracy', mode='max', save_best_only=True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=5, verbose=1, min_lr=1e-6)
+
+# Timp de start
+t1 = ti.time()
+
+# Antrenarea modelului
+history = efficient_model.fit(
+    train_generator, 
+    epochs=epoci, 
+    validation_data=validation_generator, 
+    verbose=2,
+    callbacks=[checkpoint, reduce_lr]
+)
+
+# Finalul antrenării
+t2 = ti.time()
+
+# Evaluarea modelului pe setul de validare
+validation_start = ti.time()
+val_loss, val_accuracy = efficient_model.evaluate(validation_generator, verbose=0)
+validation_end = ti.time()
+
+# Calculul latenței 
+num_samples = validation_generator.samples
+latency_per_sample = 1000 * (validation_end - validation_start) / num_samples  # in milliseconds
+
+print('====================================================')
+print(f'Initial Training with 20 epochs lasted {(t2 - t1) / 60:.2f} minutes')
+print(f'Total number of parameters: {efficient_model.count_params()}')
+print(f'Best validation accuracy: {val_accuracy * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample:.3f} ms')
+
+# Deblocarea tuturor straturilor din EfficientNet
+for layer in efficient_model.layers[0].layers:
+    layer.trainable = True
+
+# Utilizarea unei rate de învățare mai mici pentru fine-tuning
+optimizer_ft = tf.keras.optimizers.Adam(learning_rate=1e-6)
+
+efficient_model.compile(
+    optimizer=optimizer_ft,
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
+)
+# Callback pentru salvarea cel mai bun model
+checkpoint_ft = ModelCheckpoint('best_model_fine_tuned.keras', monitor='val_accuracy', mode='max', save_best_only=True, verbose=1)
+reduce_lr_ft = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=5, verbose=1, min_lr=1e-8)
+epoci_ft = 10  # Numărul de epoci pentru fine-tuning
+
+t1_fine_tuning = ti.time()
+
+# Antrenamentul pentru fine-tuning
+history_ft = efficient_model.fit(
+    train_generator,
+    epochs=epoci_ft,
+    validation_data=validation_generator,
+    verbose=2,
+    callbacks=[checkpoint_ft, reduce_lr_ft]
+)
+
+t2_fine_tuning = ti.time()
+print('====================================================')
+print(f'Fine-tuning with {epoci_ft} epochs lasted {(t2_fine_tuning-t1_fine_tuning)/60} minutes')
+
+validation_start_ft = ti.time()
+val_loss_ft, val_accuracy_ft = efficient_model.evaluate(validation_generator, verbose=0)
+validation_end_ft = ti.time()
+
+# Latența pentru etapa de fine-tuning
+latency_per_sample_ft = 1000 * (validation_end_ft - validation_start_ft) / num_samples
+
+print('====================================================')
+print(f'Fine-tuning with 10 epochs lasted {(t2_fine_tuning - t1_fine_tuning) / 60:.2f} minutes')
+print(f'Total number of parameters: {efficient_model.count_params()}')
+print(f'Best fine-tuning validation accuracy: {val_accuracy_ft * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample_ft:.3f} ms')
+
+# Salvarea greutăților pentru efectuarea de predicții 
+efficient_model.save_weights('efficient.weights.h5')
+
+# Salvarea modelului obținut în urma antrenării pentru conversia în .tflite
+efficient_model.save('effB0.keras')
+
+
+# Antrenarea modelului DenseNet
+
+def create_model():
+  input_shape=(224,224,3)
+  
+  pretrained_model = tf.keras.applications.DenseNet121(
+    include_top=False,
+    weights="imagenet",
+    input_shape=[input_shape[0], input_shape[1], 3],
+)
+  pretrained_model.trainable = True  
+
+  densenet_model = tf.keras.Sequential([
+    pretrained_model,
+    tf.keras.layers.GlobalAveragePooling2D(),
+    tf.keras.layers.Dense(num_classes, activation='softmax')
+  ])
+ 
+  return densenet_model
+
+densenet_model = create_model()
+densenet_model.compile(
+        optimizer='nadam',
+        loss = 'categorical_crossentropy',
+        metrics=['accuracy'],
+        #steps_per_execution=16
+    )
+densenet_model.summary()
+
+batch_size = 32  
+epoci = 20
+
+# Plot the model
+plot_model(densenet_model, to_file='model.png', show_shapes=True, show_layer_names=True, dpi=96)
+
+checkpoint = ModelCheckpoint('best_model_DenseNet121.keras', monitor= 'val_accuracy', mode= 'max', save_best_only = True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=3, verbose=1, min_lr=1e-5)
+
+t1=ti.time()
+history = densenet_model.fit(
+    train_generator,
+    epochs=epoci,
+    validation_data=test_generator,
+    batch_size=batch_size,
+    verbose=1,
+    callbacks=[checkpoint,reduce_lr]
+)
+t2 = ti.time()
+
+# Evaluarea modelului pe setul de validare
+validation_start = ti.time()
+val_loss, val_accuracy = densenet_model.evaluate(validation_generator, verbose=0)
+validation_end = ti.time()
+
+# Calculul latenței
+num_samples = validation_generator.samples
+latency_per_sample = 1000 * (validation_end - validation_start) / num_samples  # in milliseconds
+
+print('====================================================')
+print(f'Initial Training with 20 epochs lasted {(t2 - t1) / 60:.2f} minutes')
+print(f'Total number of parameters: {densenet_model.count_params()}')
+print(f'Best validation accuracy: {val_accuracy * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample:.3f} ms')
+# Deblocarea tuturor straturilor 
+for layer in densenet_model.layers[0].layers:
+    layer.trainable = True
+
+# Utilizarea unei rate de învățare mai mici pentru fine-tuning
+optimizer_ft = tf.keras.optimizers.Nadam(learning_rate=1e-5)
+
+densenet_model.compile(
+    optimizer=optimizer_ft,
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
+)
+
+# Callback pentru salvarea cel mai bun model
+checkpoint_ft = ModelCheckpoint('best_model_fine_tuned_dense.keras', monitor='val_accuracy', mode='max', save_best_only=True, verbose=1)
+reduce_lr_ft = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=3, verbose=1, min_lr=1e-8)
+epoci_ft = 10  # Numărul de epoci pentru fine-tuning
+
+t1 = ti.time()
+
+# Antrenamentul pentru fine-tuning
+history_ft = densenet_model.fit(
+    train_generator,
+    epochs=epoci_ft,
+    validation_data=validation_generator,
+    verbose=2,
+    callbacks=[checkpoint_ft,reduce_lr_ft]
+)
+
+t2 = ti.time()
+
+# Evaluarea acurateții pe setul de validare
+validation_start_ft = ti.time()
+val_loss_ft, val_accuracy_ft = densenet_model.evaluate(validation_generator, verbose=0)
+validation_end_ft = ti.time()
+
+# Calculul latenței
+latency_per_sample_ft = 1000 * (validation_end_ft - validation_start_ft) / num_samples
+
+# Print fine-tuning summary
+print('====================================================')
+print(f'Fine-tuning with 15 epochs lasted {(t2 - t1) / 60:.2f} minutes')
+print(f'Total number of parameters: {densenet_model.count_params()}')
+print(f'Best fine-tuning validation accuracy: {val_accuracy_ft * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample_ft:.3f} ms')
+
+#Evaluarea modelului pe setul de testare
+test_loss, test_accuracy = densenet_model.evaluate(test_generator, verbose=2)
+
+print(f'Test accuracy: {test_accuracy*100:.2f}%, test loss: {test_loss:.4f}')
+
+# Salvarea greutăților pentru efectuarea de predicții 
+densenet_model.save_weights('densenet.weights.h5')
+
+
+# Salvarea greutăților pentru efectuarea de predicții 
+densenet_model.save_weights('densenet.weights.h5')
+
+# Antrenarea modelului InceptionNet-V3. Se apelează ImageDataGenerator pentru crearea generatoarelor de antrenare, validare și test pentru dimensiunea de (299,299)
+
+def create_model(input_shape, n_out):
+    
+    pretrain_model = InceptionV3(
+        include_top=False, 
+        weights='imagenet', 
+        input_shape=input_shape)
+    
+    inception_v3_model = Sequential()
+    inception_v3_model.add(pretrain_model)
+    inception_v3_model.add(Flatten())
+    inception_v3_model.add(Activation('relu'))
+    inception_v3_model.add(Dropout(0.5))
+    inception_v3_model.add(Dense(1024))
+    inception_v3_model.add(Activation('relu'))
+    inception_v3_model.add(Dropout(0.5))
+    inception_v3_model.add(Dense(n_out))
+    inception_v3_model.add(Activation('softmax'))
+    return inception_v3_model
+
+inception_v3_model = create_model(input_shape=(299,299,3), n_out=239)
+inception_v3_model.compile(loss='categorical_crossentropy', optimizer=Adam(1e-04),metrics=['acc'])
+inception_v3_model.summary()
+
+plot_model(inception_v3_model, to_file='model.png', show_shapes=True, show_layer_names=True, dpi=96)
+
+epoci = 25; batch_size = 32
+checkpoint = ModelCheckpoint('best_model.keras', monitor='val_accuracy', mode='max', save_best_only=True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=3, verbose=1, min_lr=1e-5)
+
+t1_initial = ti.time() 
+
+history = inception_v3_model.fit(
+    train_generator, 
+    epochs=epoci, 
+    validation_data=validation_generator, 
+    verbose=2,
+    callbacks=[checkpoint, reduce_lr]
+)
+
+t2_initial = ti.time() 
+
+#latența
+validation_start = ti.time()
+val_loss, val_accuracy = inception_v3_model.evaluate(validation_generator, verbose=0)
+validation_end = ti.time()
+
+num_samples = validation_generator.samples
+latency_per_sample = 1000 * (validation_end - validation_start) / num_samples  
+
+print('====================================================')
+print(f'Initial Training with 25 epochs lasted {(t2_initial - t1_initial) / 60:.2f} minutes')
+print(f'Total number of parameters: {inception_v3_model.count_params()}')
+print(f'Best validation accuracy: {val_accuracy * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample:.3f} ms')
+
+for layer in inception_v3_model.layers[0].layers:
+    layer.trainable = True
+
+# Utilizarea unei rate de învățare mai mici pentru fine-tuning
+optimizer_ft = tf.keras.optimizers.Nadam(learning_rate=1e-5)
+
+inception_v3_model.compile(
+    optimizer=optimizer_ft,
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
+)
+
+# Callback pentru salvarea cel mai bun model
+checkpoint_ft = ModelCheckpoint('best_model_fine_tuned_incep.keras', monitor='val_accuracy', mode='max', save_best_only=True, verbose=1)
+reduce_lr_ft = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=3, verbose=1, min_lr=1e-8)
+
+epoci_ft = 10  # Numărul de epoci pentru fine-tuning
+
+t1_fine_tuning = ti.time()
+
+# Antrenamentul pentru fine-tuning
+history_ft = inception_v3_model.fit(
+    train_generator,
+    epochs=epoci_ft,
+    validation_data=validation_generator,
+    verbose=2,
+    callbacks=[checkpoint_ft,reduce_lr_ft]
+)
+t2_fine_tuning = ti.time()
+
+#latenta
+validation_start_ft = ti.time()
+val_loss_ft, val_accuracy_ft = inception_v3_model.evaluate(validation_generator, verbose=0)
+validation_end_ft = ti.time()
+
+latency_per_sample_ft = 1000 * (validation_end_ft - validation_start_ft) / num_samples
+
+print('====================================================')
+print(f'Fine-tuning with 10 epochs lasted {(t2_fine_tuning - t1_fine_tuning) / 60:.2f} minutes')
+print(f'Total number of parameters: {inception_v3_model.count_params()}')
+print(f'Best fine-tuning validation accuracy: {val_accuracy_ft * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample_ft:.3f} ms')
+
+# Evaluarea pe setul de test
+test_loss, test_accuracy = inception_v3_model.evaluate(test_generator, verbose=2)
+
+print(f'Test accuracy: {test_accuracy*100:.2f}%, test loss: {test_loss:.4f}')
+
+import matplotlib.pyplot as plt
+
+acc_initial = 'acc'
+val_acc_initial = 'val_acc'
+acc_fine_tuning = 'accuracy'
+val_acc_fine_tuning = 'val_accuracy'
+
+combined_accuracy = history.history[acc_initial] + history_ft.history[acc_fine_tuning]
+combined_val_accuracy = history.history[val_acc_initial] + history_ft.history[val_acc_fine_tuning]
+combined_loss = history.history['loss'] + history_ft.history['loss']
+combined_val_loss = history.history['val_loss'] + history_ft.history['val_loss']
+
+# Număr total de epoci
+total_epochs = range(1, len(combined_accuracy) + 1)
+
+# Crearea graficelor
+plt.figure(figsize=(10, 10))
+
+# Subplot pentru acuratețe
+plt.subplot(2, 1, 1)
+plt.plot(total_epochs, combined_accuracy, label='Acuratețea pentru antrenare')
+plt.plot(total_epochs, combined_val_accuracy, label='Acuratețea pentru validare')
+plt.title('Acuratețea pentru seturile de antrenare și validare')
+plt.legend(loc='lower right')
+plt.ylabel('Acuratețe')
+
+# Subplot pentru pierdere
+plt.subplot(2, 1, 2)
+plt.plot(total_epochs, combined_loss, label='Pierderea pentru antrenare')
+plt.plot(total_epochs, combined_val_loss, label='Pierderea pentru validare')
+plt.title('Pierderea pentru seturile de antrenare si validare')
+plt.legend(loc='upper right')
+plt.ylabel('Pierdere')
+plt.xlabel('Epocă')
+
+#Antrenarea modelului SimpleCNN
+# Construirea modelului
+simple_cnn_model = Sequential([
+    Conv2D(32, (3, 3), activation='relu', input_shape=(imsize, imsize, 3), padding='same'),
+    BatchNormalization(),
+    MaxPooling2D((2, 2)),
+    Dropout(0.3),
+
+    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D((2, 2)),
+    Dropout(0.3),
+
+    Conv2D(128, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D((2, 2)),
+    Dropout(0.3),
+    
+    Conv2D(256, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D((2, 2)),
+    Dropout(0.3),
+
+    Flatten(),
+    Dense(512, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.3),
+    Dense(num_classes, activation='softmax')
+])
+
+# Compilarea modelului
+optimizer = Adam(learning_rate=0.001)
+simple_cnn_model.compile(loss='categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+
+# Callback-uri
+checkpoint = ModelCheckpoint('model_best.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=5, verbose=1, min_lr=1e-8)
+
+t1=ti.time()
+# Antrenarea modelului
+history = simple_cnn_model.fit(
+    train_generator,
+    epochs=100,
+    validation_data=validation_generator,
+    callbacks=[checkpoint, reduce_lr]
+)
+t2=ti.time()
+
+validation_start = ti.time()
+val_loss, val_accuracy = simple_cnn_model.evaluate(validation_generator, verbose=0)
+validation_end = ti.time()
+
+# Calculul latenței
+num_samples = validation_generator.samples
+latency_per_sample = 1000 * (validation_end - validation_start) / num_samples  # in milliseconds
+
+print('====================================================')
+print(f'Initial Training with 100 epochs lasted {(t2 - t1) / 60:.2f} minutes')
+print(f'Total number of parameters: {simple_cnn_model.count_params()}')
+print(f'Best validation accuracy: {val_accuracy * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample:.3f} ms')
+
+# Evaluarea modelului
+test_loss, test_accuracy = simple_cnn_model.evaluate(test_generator)
+print(f"Test accuracy: {test_accuracy:.4f}")
+print(f"Test loss: {test_loss:.4f}")
+
+#Afișarea graficelor pentru acuratețe și pierdere
+
+import matplotlib.pyplot as plt
+
+accuracy = history.history['accuracy']
+val_accuracy = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+epochs = range(1, len(accuracy) + 1)
+
+plt.figure(figsize=(12, 6))
+plt.subplot(1, 2, 1)
+plt.plot(epochs, accuracy, 'b', label='Acuratețea pentru antrenare')
+plt.plot(epochs, val_accuracy, 'r', label='Acuratețea pentru validare')
+plt.title('Acuratețea pe seturile de antrenare și validare')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(epochs, loss, 'b', label='Pierderea pentru antrenare')
+plt.plot(epochs, val_loss, 'r', label='Pierderea pentru validare')
+plt.title('Pierderea pe seturile de antrenare și validare')
+plt.legend()
+
+plt.show()
+
+#Antrenarea modelului ResNet
+
+def identity_block(X: tf.Tensor, level: int, block: int, filters: List[int]) -> tf.Tensor:
+
+    # layers will be called conv{level}iden{block}{convlayer_number_within_block}'
+    conv_name = f'conv{level}{block}' + '{layer}_{type}'
+
+    # unpack number of filters to be used for each conv layer
+    f1, f2, f3 = filters
+
+    # the shortcut branch of the identity block
+    # takes the value of the block input
+    X_shortcut = X
+
+    # first convolutional layer (plus batch norm & relu activation, of course)
+    X = Conv2D(filters=f1, kernel_size=(1, 1), strides=(1, 1),
+               padding='valid', name=conv_name.format(layer=1, type='conv'),
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name=conv_name.format(layer=1, type='bn'))(X)
+    X = Activation('relu', name=conv_name.format(layer=1, type='relu'))(X)
+
+    # second convolutional layer
+    X = Conv2D(filters=f2, kernel_size=(3, 3), strides=(1, 1),
+               padding='same', name=conv_name.format(layer=2, type='conv'),
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name=conv_name.format(layer=2, type='bn'))(X)
+    X = Activation('relu')(X)
+
+    # third convolutional layer
+    X = Conv2D(filters=f3, kernel_size=(1, 1), strides=(1, 1),
+               padding='valid', name=conv_name.format(layer=3, type='conv'),
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name=conv_name.format(layer=3, type='bn'))(X)
+
+    # add shortcut branch to main path
+    X = Add()([X, X_shortcut])
+
+    # relu activation at the end of the block
+    X = Activation('relu', name=conv_name.format(layer=3, type='relu'))(X)
+
+    return X
+
+
+
+def convolutional_block(X: tf.Tensor, level: int, block: int, filters: List[int], s: Tuple[int,int,int]=(2, 2)) -> tf.Tensor:
+
+    # layers will be called conv{level}{block}{convlayer_number_within_block}'
+    conv_name = f'conv{level}{block}' + '{layer}_{type}'
+
+    # unpack number of filters to be used for each conv layer
+    f1, f2, f3 = filters
+
+    # the shortcut branch of the convolutional block
+    X_shortcut = X
+
+    # first convolutional layer
+    X = Conv2D(filters=f1, kernel_size=(1, 1), strides=s, padding='valid',
+               name=conv_name.format(layer=1, type='conv'),
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name=conv_name.format(layer=1, type='bn'))(X)
+    X = Activation('relu', name=conv_name.format(layer=1, type='relu'))(X)
+
+    # second convolutional layer
+    X = Conv2D(filters=f2, kernel_size=(3, 3), strides=(1, 1), padding='same',
+               name=conv_name.format(layer=2, type='conv'),
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name=conv_name.format(layer=2, type='bn'))(X)
+    X = Activation('relu', name=conv_name.format(layer=2, type='relu'))(X)
+
+    # third convolutional layer
+    X = Conv2D(filters=f3, kernel_size=(1, 1), strides=(1, 1), padding='valid',
+               name=conv_name.format(layer=3, type='conv'),
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name=conv_name.format(layer=3, type='bn'))(X)
+
+    # shortcut path
+    X_shortcut = Conv2D(filters=f3, kernel_size=(1, 1), strides=s, padding='valid',
+                        name=conv_name.format(layer='short', type='conv'),
+                        kernel_initializer=glorot_uniform(seed=0))(X_shortcut)
+    X_shortcut = BatchNormalization(axis=3, name=conv_name.format(layer='short', type='bn'))(X_shortcut)
+
+    # add shortcut branch to main path
+    X = Add()([X, X_shortcut])
+
+    # nonlinearity
+    X = Activation('relu', name=conv_name.format(layer=3, type='relu'))(X)
+
+    return X
+
+from tensorflow.keras import Model
+def ResNet50(input_size: Tuple[int,int,int], classes: int) -> Model:
+
+    # tensor placeholder for the model's input
+    X_input = Input(input_size)
+
+    ### Level 1 ###
+
+    # padding
+    X = ZeroPadding2D((3, 3))(X_input)
+
+    # convolutional layer, followed by batch normalization and relu activation
+    X = Conv2D(filters=64, kernel_size=(7, 7), strides=(2, 2),
+               name='conv1_1_1_conv',
+               kernel_initializer=glorot_uniform(seed=0))(X)
+    X = BatchNormalization(axis=3, name='conv1_1_1_nb')(X)
+    X = Activation('relu')(X)
+
+    ### Level 2 ###
+
+    # max pooling layer to halve the size coming from the previous layer
+    X = MaxPooling2D((3, 3), strides=(2, 2))(X)
+
+    # 1x convolutional block
+    X = convolutional_block(X, level=2, block=1, filters=[64, 64, 256], s=(1, 1))
+
+    # 2x identity blocks
+    X = identity_block(X, level=2, block=2, filters=[64, 64, 256])
+    X = identity_block(X, level=2, block=3, filters=[64, 64, 256])
+
+    ### Level 3 ###
+
+    # 1x convolutional block
+    X = convolutional_block(X, level=3, block=1, filters=[128, 128, 512], s=(2, 2))
+
+    # 3x identity blocks
+    X = identity_block(X, level=3, block=2, filters=[128, 128, 512])
+    X = identity_block(X, level=3, block=3, filters=[128, 128, 512])
+    X = identity_block(X, level=3, block=4, filters=[128, 128, 512])
+
+    ### Level 4 ###
+    # 1x convolutional block
+    X = convolutional_block(X, level=4, block=1, filters=[256, 256, 1024], s=(2, 2))
+    # 5x identity blocks
+    X = identity_block(X, level=4, block=2, filters=[256, 256, 1024])
+    X = identity_block(X, level=4, block=3, filters=[256, 256, 1024])
+    X = identity_block(X, level=4, block=4, filters=[256, 256, 1024])
+    X = identity_block(X, level=4, block=5, filters=[256, 256, 1024])
+    X = identity_block(X, level=4, block=6, filters=[256, 256, 1024])
+
+    ### Level 5 ###
+    # 1x convolutional block
+    X = convolutional_block(X, level=5, block=1, filters=[512, 512, 2048], s=(2, 2))
+    # 2x identity blocks
+    X = identity_block(X, level=5, block=2, filters=[512, 512, 2048])
+    X = identity_block(X, level=5, block=3, filters=[512, 512, 2048])
+
+    # Pooling layers
+    X = AveragePooling2D(pool_size=(2, 2), name='avg_pool')(X)
+
+    # Output layer
+    X = Flatten()(X)
+    X = Dense(classes, activation='softmax', name='fc_' + str(classes),
+              kernel_initializer=glorot_uniform(seed=0))(X)
+
+    # Create model
+    resnet_model = Model(inputs=X_input, outputs=X, name='ResNet50')
+
+    return resnet_model
+# Callback-uri
+checkpoint = ModelCheckpoint('model_best.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=5, verbose=1, min_lr=1e-8)
+
+image_size = (224,224) 
+channels = 3
+resnet_model = ResNet50(input_size = (image_size[1], image_size[0], channels), classes = num_classes)
+
+# Antrenarea modelului
+resnet_model.compile(
+    optimizer='nadam',  
+    loss='categorical_crossentropy',  
+    metrics=['accuracy']  
+)
+
+plot_model(resnet_model, to_file='model.png', show_shapes=True, show_layer_names=True, dpi=96)
+
+resnet_model.summary()
+start = ti.time()
+
+with tf.device('/gpu:0'):
+    history = resnet_model.fit(
+        train_generator,  
+        validation_data=validation_generator,  
+        epochs=100,
+        callbacks=[checkpoint, reduce_lr],  
+    )
+stop = ti.time()
+print(f'Training on GPU took: {(stop-start)/60} minutes')
+
+validation_start = ti.time()
+val_loss, val_accuracy = resnet_model.evaluate(validation_generator, verbose=0)
+validation_end = ti.time()
+
+# Calculul latenței
+num_samples = validation_generator.samples
+latency_per_sample = 1000 * (validation_end - validation_start) / num_samples  # in milliseconds
+
+print('====================================================')
+print(f'Initial Training with 100 epochs lasted {(t2 - t1) / 60:.2f} minutes')
+print(f'Total number of parameters: {resnet_model.count_params()}')
+print(f'Best validation accuracy: {val_accuracy * 100:.2f}%')
+print(f'Latency - GPU (per sample): {latency_per_sample:.3f} ms')
