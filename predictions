@@ -1,0 +1,42 @@
+# Cod folosit pentru predicții
+
+from tensorflow.keras.preprocessing import image
+import numpy as np
+import os
+
+# Calea către directorul cu imagini
+directory_path = '../input/test-cars/Test_Cars (1)/Test_Cars'
+accepted_extensions = ('.jpg', '.jpeg', '.JPG')
+
+# parcurgerea imaginilor din director
+for filename in os.listdir(directory_path):
+    if filename.endswith(accepted_extensions):  
+        img_path = os.path.join(directory_path, filename)
+
+        # Încărcarea și redimensionarea imaginii la dimensiunea necesară modelului (224x224)
+        img = image.load_img(img_path, target_size=(224, 224))
+        
+        # Convertirea imaginii într-un array numpy
+        img_array = image.img_to_array(img)
+
+        # Rescalarea pixelilor în intervalul [0, 1]
+        img_array /= 255.0
+
+        # Adăugarea unei dimensiuni suplimentare pentru batch_size, necesară la predicție
+        img_array = np.expand_dims(img_array, axis=0)
+
+        # Realizează predicția folosind modelul încărcat
+        predictions_dense = densenet_model.predict(img_array)
+        
+        predictions_eff = efficientnet_model.predict(img_array)
+
+        # Obținerea indexului clasei cu cea mai mare probabilitate
+        predicted_class_name_eff = list(train_generator.class_indices.keys())[np.argmax(predictions_eff[0])]
+        predicted_class_name_dense = list(train_generator.class_indices.keys())[np.argmax(predictions_dense[0])]
+
+        # Afișarea numelui fișierului și indexul clasei prezise 
+        print(f'Fișier: {filename}')
+        print(f'Clasa prezisă eff: {predicted_class_name_eff}')
+        print(f'Clasa prezisă dense: {predicted_class_name_dense}')
+        print("----------")
+
