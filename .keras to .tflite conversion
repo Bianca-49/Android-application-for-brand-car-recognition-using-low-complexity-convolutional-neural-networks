@@ -1,0 +1,24 @@
+
+# Anexa 2
+#Conversia modelului din extensia .keras în extensia .tflite. Mai jos este ilustrată conversia în cazul modelului EfficientNet, aceeași procedură fiind aplicată și pentru modelul DenseNet
+
+model.save('effB0.keras')
+model=load_model('effB0.keras')  
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+
+t1=ti.time()
+tflite_model = converter.convert()
+t2=ti.time()
+
+print('Durata conversie: ', t2-t1,' secunde')
+open("effB0.tflite", "wb").write(tflite_model)
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+converter.target_spec.supported_types = [tf.float16]
+
+t1=ti.time()
+quantized_tflite_model = converter.convert()
+t2=ti.time()
+
+print('Durata conversie: ', t2-t1,' secunde')
+open("effB0_quant.tflite", "wb").write(quantized_tflite_model)
